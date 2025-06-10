@@ -1,28 +1,38 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>  // for stat()
+#include <unistd.h>    // for access()
 
 #define MAX_LINE 128
 #define MAX_FIELD 64
 #define MAX_PATH 256
 
-// Helper to trim both \n and \r from strings
+// Trim newline and carriage return characters
 void trim_newline(char* str) {
     str[strcspn(str, "\r\n")] = '\0';
 }
 
+// Check if path is a directory
+int is_directory(const char *path) {
+    struct stat st;
+    if (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
+        return 1;
+    }
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
     if (argc != 2) {
-        fprintf(stderr, "Usage: %s <path-to-local-file>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <file-or-directory-to-transfer>\n", argv[0]);
         return 1;
     }
 
-    const char* local_file = argv[1];
+    const char* local_path = argv[1];
     char remote_ip[MAX_FIELD] = {0};
     char remote_user[MAX_FIELD] = {0};
     char remote_path[MAX_PATH] = {0};
 
-    // Open config file
     FILE *config = fopen("config.txt", "r");
     if (!config) {
         perror("Failed to open config.txt");
@@ -31,7 +41,7 @@ int main(int argc, char *argv[]) {
 
     char line[MAX_LINE];
     while (fgets(line, sizeof(line), config)) {
-        trim_newline(line);  // Clean the line first
+        trim_newline(line);
 
         if (strncmp(line, "ip=", 3) == 0) {
             strncpy(remote_ip, line + 3, MAX_FIELD - 1);
@@ -46,27 +56,28 @@ int main(int argc, char *argv[]) {
     }
     fclose(config);
 
-    // Validate all fields were populated
     if (strlen(remote_ip) == 0 || strlen(remote_user) == 0 || strlen(remote_path) == 0) {
         fprintf(stderr, "Invalid config file: missing ip, user, or path.\n");
         return 1;
     }
 
-    // Debug print (safe to remove later)
-    printf("DEBUG:\n  user='%s'\n  ip='%s'\n  path='%s'\n", remote_user, remote_ip, remote_path);
+    // Determine if path is a directory
+    int is_dir = is_directory(local_path);
 
-    // Build the scp command
-    char command[512];
+    // Choose -r flag if it's a directory
+    const char *scp_flags = is_dir ? "-r" : "";
+
+    // Build scp command
+    char command[1024];
     snprintf(command, sizeof(command),
-        "scp \"%s\" %s@%s:\"%s\"",
-        local_file, remote_user, remote_ip, remote_path
+        "scp %s \"%s\" %s@%s:\"%s\"",
+        scp_flags, local_path, remote_user, remote_ip, remote_path
     );
 
-    // Execute it
+    // Run it
     int result = system(command);
-
     if (result != 0) {
-        fprintf(stderr, "File transfer failed (scp exit code %d)\n", result);
+        fprintf(stderr, "File or directory transfer failed (scp exit code %d)\n", result);
         return 1;
     }
 
